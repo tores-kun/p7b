@@ -1,8 +1,9 @@
-import sys, os, configparser, pkg_resources
-from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QFileDialog, QMessageBox, QLabel
+import sys, os, configparser, pkg_resources, logging
+from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QLabel, QSizePolicy
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
 from p7b import parse_p7b_files
+from datetime import datetime
 
 def get_image_data():
     try:
@@ -29,6 +30,7 @@ class CertificateParserApp(QWidget):
         self.input_folder = None
         self.output_folder = None
         self.background_image_path = None
+        self.log_filename = None
         self.load_config()
         self.init_ui()
 
@@ -48,7 +50,7 @@ class CertificateParserApp(QWidget):
 
     def init_ui(self):
         self.setWindowTitle('Извлечение всех .cer из .p7b')
-        self.setGeometry(300, 300, 400, 200)
+        self.setGeometry(300, 300, 512, 512)
 
         # Загрузка изображения
         background_image = QLabel(self)
@@ -66,34 +68,43 @@ class CertificateParserApp(QWidget):
         if self.input_folder:
             self.input_folder_label = QLabel(f'Выбрана папка: {self.input_folder}', self)
         else:
-            self.input_folder_label = QLabel('Выберите папку с P7B-файлами:', self)
+            self.input_folder_label = QLabel('Выберите папку с P7B-файлами', self)
 
         self.input_folder_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 2px;")
 
         # Внешний контейнер для группировки виджетов с текстом и кнопкой
         input_container = QVBoxLayout()
 
-        input_container.addWidget(self.input_folder_label, alignment=Qt.AlignTop | Qt.AlignLeft)
+        input_folder_widget = QWidget(self)  # Виджет для объединения label и button
+        input_folder_layout = QVBoxLayout(input_folder_widget)
+        input_folder_layout.addWidget(self.input_folder_label)
 
-        self.input_folder_button = QPushButton('Выберите папку с P7B-файлами:', self)
+        self.input_folder_button = QPushButton('Выберите папку с P7B-файлами', self)
         self.input_folder_button.clicked.connect(self.select_input_folder)
         self.input_folder_button.setStyleSheet("color: white; background-color: green; border-radius: 5px; padding: 2px; font-size: 14px; margin-top: 0px;")
-        input_container.addWidget(self.input_folder_button, alignment=Qt.AlignTop | Qt.AlignLeft)
+        input_folder_layout.addWidget(self.input_folder_button)
 
         # Установка размера для внешнего контейнера
-        input_container.setSizeConstraint(QVBoxLayout.SetFixedSize)
+        input_folder_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        input_container.addWidget(input_folder_widget, alignment=Qt.AlignTop | Qt.AlignLeft)
 
         # Output folder label initialization
         if self.output_folder:
             self.output_folder_label = QLabel(f'Выбрана папка: {self.output_folder}', self)
         else:
-            self.output_folder_label = QLabel('Выберите выходную папку:', self)
+            self.output_folder_label = QLabel('Выберите выходную папку', self)
 
-        self.output_folder_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-
-        self.output_folder_button = QPushButton('Выберите выходную папку:', self)
+        self.output_folder_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 2px;")
+        output_container = QVBoxLayout()
+        output_folder_widget = QWidget(self)  # Виджет для объединения label и button
+        output_folder_layout = QVBoxLayout(output_folder_widget)
+        output_folder_layout.addWidget(self.output_folder_label)
+        self.output_folder_button = QPushButton('Выберите выходную папку', self)
         self.output_folder_button.clicked.connect(self.select_output_folder)
         self.output_folder_button.setStyleSheet("color: white; background-color: green; border-radius: 5px; padding: 5px; font-size: 14px; margin-left: 0px;")
+        output_folder_layout.addWidget(self.output_folder_button)
+        output_folder_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        output_container.addWidget(output_folder_widget, alignment=Qt.AlignTop | Qt.AlignLeft)
 
         self.run_button = QPushButton('Запустить', self)
         self.run_button.clicked.connect(self.run_parser)
@@ -101,17 +112,13 @@ class CertificateParserApp(QWidget):
 
         self.author_label = QLabel('© Белоусов А.В.', self)
 
-        output_layout = QVBoxLayout()
-        output_layout.addWidget(self.output_folder_label, alignment=Qt.AlignTop | Qt.AlignLeft)
-        output_layout.addWidget(self.output_folder_button, alignment=Qt.AlignTop | Qt.AlignLeft)
-
         button_layout = QVBoxLayout()
         button_layout.addWidget(self.run_button, alignment=Qt.AlignTop | Qt.AlignRight)
-        button_layout.addWidget(self.author_label, alignment=Qt.AlignTop | Qt.AlignRight)
+        button_layout.addWidget(self.author_label, alignment=Qt.AlignBottom | Qt.AlignRight)
 
         main_layout = QVBoxLayout(self)
         main_layout.addLayout(input_container)  
-        main_layout.addLayout(output_layout)
+        main_layout.addLayout(output_container)
         main_layout.addLayout(button_layout)
 
         # Применение стилей к виджетам через qss
@@ -139,14 +146,20 @@ class CertificateParserApp(QWidget):
             self.save_config()
 
     def run_parser(self):
-        try:
-            if self.input_folder and self.output_folder:  # Добавлено условие
-                parse_p7b_files(self.input_folder, self.output_folder)
-                QMessageBox.information(self, 'Готово', 'Извлечение завершено успешно!')
-            else:
-                QMessageBox.warning(self, 'Внимание', 'Выберите папки ввода и вывода перед запуском')
-        except AttributeError:
-            pass  # Handle the case where folders are not selected yet
+            # Инициализация логгера при нажатии кнопки "Запустить"
+            self.log_filename = f"log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+            logging.basicConfig(filename=self.log_filename, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+            try:
+                if self.input_folder and self.output_folder:
+                    parse_p7b_files(self.input_folder, self.output_folder)
+                    QMessageBox.information(self, 'Готово', 'Извлечение завершено успешно!')
+                else:
+                    QMessageBox.warning(self, 'Внимание', 'Выберите папки ввода и вывода перед запуском')
+            except AttributeError:
+                pass  # Handle the case where folders are not selected yet
+
+
 
 if __name__ == '__main__':
     image_data = get_image_data()

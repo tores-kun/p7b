@@ -1,6 +1,8 @@
 main2.py
 in/
-
+myenv/
+log_*
+config.ini
 
 
 # Byte-compiled / optimized / DLL files

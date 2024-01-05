@@ -6,7 +6,7 @@ from datetime import datetime
 
 # Настройка логгера
 log_filename = f"log_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
-logging.basicConfig(filename=log_filename, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# logging.basicConfig(filename=log_filename, level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def clean_filename(filename):
     # Заменить все недопустимые символы на нижнее подчеркивание
