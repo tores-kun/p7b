@@ -68,7 +68,7 @@ class CertificateParserApp(QWidget):
         if self.input_folder:
             self.input_folder_label = QLabel(f'Выбрана папка: {self.input_folder}', self)
         else:
-            self.input_folder_label = QLabel('Выберите папку с P7B-файлами', self)
+            self.input_folder_label = QLabel('Выберите папку с P7B-файлами:', self)
 
         self.input_folder_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 2px;")
 
@@ -92,7 +92,7 @@ class CertificateParserApp(QWidget):
         if self.output_folder:
             self.output_folder_label = QLabel(f'Выбрана папка: {self.output_folder}', self)
         else:
-            self.output_folder_label = QLabel('Выберите папку куда будут извлечены .cer', self)
+            self.output_folder_label = QLabel('Выберите папку куда будут извлечены .cer:', self)
 
         self.output_folder_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 2px;")
         output_container = QVBoxLayout()
