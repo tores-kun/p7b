@@ -92,14 +92,14 @@ class CertificateParserApp(QWidget):
         if self.output_folder:
             self.output_folder_label = QLabel(f'Выбрана папка: {self.output_folder}', self)
         else:
-            self.output_folder_label = QLabel('Выберите выходную папку', self)
+            self.output_folder_label = QLabel('Выберите папку куда будут извлечены .cer', self)
 
         self.output_folder_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 2px;")
         output_container = QVBoxLayout()
         output_folder_widget = QWidget(self)  # Виджет для объединения label и button
         output_folder_layout = QVBoxLayout(output_folder_widget)
         output_folder_layout.addWidget(self.output_folder_label)
-        self.output_folder_button = QPushButton('Выберите выходную папку', self)
+        self.output_folder_button = QPushButton('Выберите папку куда будут извлечены .cer', self)
         self.output_folder_button.clicked.connect(self.select_output_folder)
         self.output_folder_button.setStyleSheet("color: white; background-color: green; border-radius: 5px; padding: 5px; font-size: 14px; margin-left: 0px;")
         output_folder_layout.addWidget(self.output_folder_button)
