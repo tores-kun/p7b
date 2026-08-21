@@ -1,0 +1,48 @@
+# Настройки извлечения сертификатов из .p7b.
+# Файл читают и GUI, и запуск из консоли (python p7b.py).
+# GUI перезаписывает его при изменении настроек.
+#
+# Naming.Preset — готовый вариант имени файла, одно из:
+#   fio | surname | serial | sok_id | fio_serial | surname_serial | fio_sok_id | fio_serial_surname | custom
+# Naming.Template используется, когда Preset = custom.
+# Поля, доступные в шаблоне:
+#   {fio}           — ФИО (CN)
+#   {surname}       — Фамилия
+#   {given_name}    — Имя и отчество
+#   {serial}        — Номер сертификата
+#   {sok_id}        — ID СОК
+#   {subject_id}    — Идентификатор в теме
+#   {unp}           — УНП
+#   {org}           — Организация
+#   {unit}          — Подразделение
+#   {position}      — Должность
+#   {email}         — Email
+#   {thumbprint}    — Отпечаток SHA-1
+#   {valid_from}    — Действителен с
+#   {valid_to}      — Действителен по
+#   {issuer}        — Издатель
+#
+# Extract.Certificates:
+#   all  — извлекать все сертификаты, включая вышестоящие (УЦ)
+#   user — только сертификаты пользователя
+#
+# General.ShowGui:
+#   yes — при запуске открывается окно программы
+#   no  — окно не открывается, извлечение стартует сразу
+#         и программа закрывается (результат — в файле log_*.txt)
+# Открыть окно при ShowGui = no: запустить с ключом --gui
+# Разово запустить без окна при ShowGui = yes: ключ --no-gui
+
+[Paths]
+InputFolder = 
+OutputFolder = 
+
+[Naming]
+Preset = fio_serial_surname
+Template = {fio}_{serial}_{surname}
+
+[Extract]
+Certificates = all
+
+[General]
+ShowGui = yes
