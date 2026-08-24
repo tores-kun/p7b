@@ -13,9 +13,10 @@ from asn1crypto import cms
 # Поля, доступные для подстановки в шаблон имени файла.
 # ключ -> (подпись для GUI, пример значения)
 FIELDS = OrderedDict([
-    ('fio',            ('ФИО (CN)',                 'Иванов Иван Иванович')),
+    ('fio',            ('CN (ФИО/наименование)',    'Иванов Иван Иванович')),
     ('surname',        ('Фамилия',                  'Иванов')),
     ('given_name',     ('Имя и отчество',           'Иван Иванович')),
+    ('first_name',     ('Имя',                      'Иван')),
     ('serial',         ('Номер сертификата',        '4d2a9f31e7')),
     ('sok_id',         ('ID СОК',                   '8ef85dc4ce04892f98303410923936870cedca33')),
     ('subject_id',     ('Идентификатор в теме',     '1234567890123')),
@@ -46,9 +47,11 @@ PRESETS = OrderedDict([
 DEFAULT_PRESET = 'fio_serial_surname'
 DEFAULT_TEMPLATE = PRESETS[DEFAULT_PRESET][1]
 
-# УНП в сертификатах ГосСУОК: OID 1.2.112.1.2.1.1.1.1.2.
+# Национальные OID ГосСУОК (см. "Перечень объектных уникальных идентификаторов" nces.by).
 # asn1crypto отдаёт неизвестные OID строкой, поэтому сверяем по окончанию.
-_UNP_OID_SUFFIX = '112.1.2.1.1.1.1.2'
+_UNP_OID_SUFFIX = '112.1.2.1.1.1.1.2'          # УНП — атрибут организации (tax-id)
+_PRIV_NUM_OID_SUFFIX = '112.1.2.1.1.1.1.1'     # Личный номер ФЛ (priv-num) — в сертификатах ЮЛ
+_ORG_UNIT_OID_SUFFIX = '112.1.2.1.1.5.2'       # Подразделение (org-unit) — в сертификатах ЮЛ
 
 _INVALID_CHARS = re.compile(r'[\\/*?:"<>|\x00-\x1f]')
 _PLACEHOLDER = re.compile(r'\{(\w+)\}')
@@ -88,6 +91,52 @@ def _subject_oid(subject, oid_suffix):
     return ''
 
 
+def _der_string_content(data):
+    """Достать содержимое DER-примитива (TLV) как текст.
+
+    Значения нераспознанных asn1crypto national-OID-расширений отдаются
+    как сырые DER-байты вложенного ASN.1-значения (обычно строка) —
+    заголовок тега/длины нужно снять вручную.
+    """
+    if not data or len(data) < 2:
+        return ''
+    length = data[1]
+    if length & 0x80:
+        num_bytes = length & 0x7f
+        offset = 2 + num_bytes
+        length = int.from_bytes(data[2:offset], 'big')
+    else:
+        offset = 2
+    content = data[offset:offset + length]
+    try:
+        return content.decode('utf-8').strip()
+    except UnicodeDecodeError:
+        return content.decode('cp1251', errors='replace').strip()
+
+
+def _certificate_extension(certificate, oid_suffix):
+    """Значение расширения сертификата (не атрибута subject) по окончанию OID.
+
+    В сертификатах ГосСУОК некоторые национальные атрибуты (например, УНП
+    организации) вынесены не в subject, а в отдельное extension.
+    """
+    try:
+        extensions = certificate['tbs_certificate']['extensions']
+    except (ValueError, KeyError, AttributeError):
+        return ''
+    for extension in extensions:
+        try:
+            if extension['extn_id'].dotted.endswith(oid_suffix):
+                return _der_string_content(extension['extn_value'].native)
+        except (ValueError, KeyError, AttributeError):
+            continue
+    return ''
+
+
+def _first_word(text):
+    return text.split()[0] if text.split() else ''
+
+
 def _subject_key_identifier(certificate):
     """ID СОК — Subject Key Identifier сертификата."""
     try:
@@ -110,16 +159,23 @@ def extract_fields(certificate):
     issuer = tbs['issuer'].native or {}
     validity = tbs['validity']
 
+    # OID 2.5.4.41 ('name'): "Имя" в сертификатах ФЛ, "Имя и отчество" в сертификатах ЮЛ.
+    given_name = _text(subject.get('name'))
+
     return {
         'fio': _text(subject.get('common_name')),
         'surname': _text(subject.get('surname')),
-        'given_name': _text(subject.get('given_name')),
+        'given_name': given_name,
+        'first_name': _first_word(given_name),
         'serial': format(tbs['serial_number'].native, 'x'),
         'sok_id': _subject_key_identifier(certificate),
-        'subject_id': _text(subject.get('serial_number')),
-        'unp': _subject_oid(subject, _UNP_OID_SUFFIX),
+        # Стандартный serialNumber (2.5.4.5) — для ФЛ; в сертификатах ЮЛ тот же
+        # смысловой атрибут (личный номер представителя) лежит под нац. OID priv-num.
+        'subject_id': _text(subject.get('serial_number')) or _subject_oid(subject, _PRIV_NUM_OID_SUFFIX),
+        # УНП в сертификатах ЮЛ — отдельное расширение сертификата, не атрибут subject.
+        'unp': _subject_oid(subject, _UNP_OID_SUFFIX) or _certificate_extension(certificate, _UNP_OID_SUFFIX),
         'org': _text(subject.get('organization_name')),
-        'unit': _text(subject.get('organizational_unit_name')),
+        'unit': _text(subject.get('organizational_unit_name')) or _subject_oid(subject, _ORG_UNIT_OID_SUFFIX),
         'position': _text(subject.get('title')),
         'email': _text(subject.get('email_address')),
         'thumbprint': certificate.sha1.hex(),

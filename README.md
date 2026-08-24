@@ -12,14 +12,14 @@
 Вариант «Свой шаблон…» открывает поле, куда поля подставляются кнопкой «+ поле»:<br>
 
 <pre>
-{fio}         ФИО (CN)                {org}         Организация
+{fio}         CN (ФИО/наименование)   {org}         Организация
 {surname}     Фамилия                 {unit}        Подразделение
 {given_name}  Имя и отчество          {position}    Должность
-{serial}      Номер сертификата       {email}       Email
-{sok_id}      ID СОК (Subject Key Identifier)       {thumbprint}  Отпечаток SHA-1
-{subject_id}  Идентификатор в теме    {valid_from}  Действителен с
-{unp}         УНП                     {valid_to}    Действителен по
-                                      {issuer}      Издатель
+{first_name}  Имя                     {email}       Email
+{serial}      Номер сертификата       {thumbprint}  Отпечаток SHA-1
+{sok_id}      ID СОК (Subject Key Identifier)       {valid_from}  Действителен с
+{subject_id}  Идентификатор в теме    {valid_to}    Действителен по
+{unp}         УНП                     {issuer}      Издатель
 </pre>
 
 Если поле в сертификате отсутствует, оно подставляется пустым, а лишние разделители убираются.<br>
