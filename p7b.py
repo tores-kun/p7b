@@ -19,7 +19,6 @@ FIELDS = OrderedDict([
     ('first_name',     ('Имя',                      'Иван')),
     ('serial',         ('Номер сертификата',        '4d2a9f31e7')),
     ('sok_id',         ('ID СОК',                   '8ef85dc4ce04892f98303410923936870cedca33')),
-    ('subject_id',     ('Идентификатор в теме',     '1234567890123')),
     ('unp',            ('УНП',                      '191234567')),
     ('org',            ('Организация',              'ООО Ромашка')),
     ('unit',           ('Подразделение',            'Бухгалтерия')),
@@ -50,7 +49,6 @@ DEFAULT_TEMPLATE = PRESETS[DEFAULT_PRESET][1]
 # Национальные OID ГосСУОК (см. "Перечень объектных уникальных идентификаторов" nces.by).
 # asn1crypto отдаёт неизвестные OID строкой, поэтому сверяем по окончанию.
 _UNP_OID_SUFFIX = '112.1.2.1.1.1.1.2'          # УНП — атрибут организации (tax-id)
-_PRIV_NUM_OID_SUFFIX = '112.1.2.1.1.1.1.1'     # Личный номер ФЛ (priv-num) — в сертификатах ЮЛ
 _ORG_UNIT_OID_SUFFIX = '112.1.2.1.1.5.2'       # Подразделение (org-unit) — в сертификатах ЮЛ
 
 _INVALID_CHARS = re.compile(r'[\\/*?:"<>|\x00-\x1f]')
@@ -91,15 +89,21 @@ def _subject_oid(subject, oid_suffix):
     return ''
 
 
+_CONTROL_CHARS = re.compile(r'[\x00-\x1f]')
+
+
 def _der_string_content(data):
     """Достать содержимое DER-примитива (TLV) как текст.
 
     Значения нераспознанных asn1crypto national-OID-расширений отдаются
     как сырые DER-байты вложенного ASN.1-значения (обычно строка) —
-    заголовок тега/длины нужно снять вручную.
+    заголовок тега/длины нужно снять вручную. BMPString (тег 0x1E) хранит
+    текст в UTF-16BE — иначе между символами остаются нулевые байты,
+    которые clean_filename превращает в «_» между цифрами.
     """
     if not data or len(data) < 2:
         return ''
+    tag = data[0] & 0x1f
     length = data[1]
     if length & 0x80:
         num_bytes = length & 0x7f
@@ -108,10 +112,17 @@ def _der_string_content(data):
     else:
         offset = 2
     content = data[offset:offset + length]
-    try:
-        return content.decode('utf-8').strip()
-    except UnicodeDecodeError:
-        return content.decode('cp1251', errors='replace').strip()
+    if tag == 0x1e:
+        try:
+            text = content.decode('utf-16-be')
+        except UnicodeDecodeError:
+            text = content.decode('utf-8', errors='replace')
+    else:
+        try:
+            text = content.decode('utf-8')
+        except UnicodeDecodeError:
+            text = content.decode('cp1251', errors='replace')
+    return _CONTROL_CHARS.sub('', text).strip()
 
 
 def _certificate_extension(certificate, oid_suffix):
@@ -169,9 +180,6 @@ def extract_fields(certificate):
         'first_name': _first_word(given_name),
         'serial': format(tbs['serial_number'].native, 'x'),
         'sok_id': _subject_key_identifier(certificate),
-        # Стандартный serialNumber (2.5.4.5) — для ФЛ; в сертификатах ЮЛ тот же
-        # смысловой атрибут (личный номер представителя) лежит под нац. OID priv-num.
-        'subject_id': _text(subject.get('serial_number')) or _subject_oid(subject, _PRIV_NUM_OID_SUFFIX),
         # УНП в сертификатах ЮЛ — отдельное расширение сертификата, не атрибут subject.
         'unp': _subject_oid(subject, _UNP_OID_SUFFIX) or _certificate_extension(certificate, _UNP_OID_SUFFIX),
         'org': _text(subject.get('organization_name')),

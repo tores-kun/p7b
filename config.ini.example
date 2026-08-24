@@ -6,12 +6,12 @@
 #   fio | surname | serial | sok_id | fio_serial | surname_serial | fio_sok_id | fio_serial_surname | custom
 # Naming.Template используется, когда Preset = custom.
 # Поля, доступные в шаблоне:
-#   {fio}           — ФИО (CN)
+#   {fio}           — CN (ФИО/наименование)
 #   {surname}       — Фамилия
 #   {given_name}    — Имя и отчество
+#   {first_name}    — Имя
 #   {serial}        — Номер сертификата
 #   {sok_id}        — ID СОК
-#   {subject_id}    — Идентификатор в теме
 #   {unp}           — УНП
 #   {org}           — Организация
 #   {unit}          — Подразделение

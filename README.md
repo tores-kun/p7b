@@ -18,8 +18,8 @@
 {first_name}  Имя                     {email}       Email
 {serial}      Номер сертификата       {thumbprint}  Отпечаток SHA-1
 {sok_id}      ID СОК (Subject Key Identifier)       {valid_from}  Действителен с
-{subject_id}  Идентификатор в теме    {valid_to}    Действителен по
-{unp}         УНП                     {issuer}      Издатель
+{unp}         УНП                     {valid_to}    Действителен по
+                                      {issuer}      Издатель
 </pre>
 
 Если поле в сертификате отсутствует, оно подставляется пустым, а лишние разделители убираются.<br>
