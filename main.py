@@ -134,7 +134,7 @@ class CertificateParserApp(QWidget):
 
         template_row = QHBoxLayout()
         self.template_edit = QLineEdit(self)
-        self.template_edit.setPlaceholderText('{fio}_{serial}')
+        self.template_edit.setPlaceholderText('{CN}_{serial}')
         self.template_edit.textChanged.connect(self.on_template_changed)
         template_row.addWidget(self.template_edit)
 

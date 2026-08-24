@@ -3,15 +3,16 @@
 # GUI перезаписывает его при изменении настроек.
 #
 # Naming.Preset — готовый вариант имени файла, одно из:
-#   fio | surname | serial | sok_id | fio_serial | surname_serial | fio_sok_id | fio_serial_surname | custom
+#   CN | surname | serial | sok_id | CN_serial | surname_serial | CN_sok_id | CN_serial_surname | custom
 # Naming.Template используется, когда Preset = custom.
 # Поля, доступные в шаблоне:
-#   {fio}           — CN (ФИО/наименование)
+#   {CN}            — CN (ФИО/наименование)
 #   {surname}       — Фамилия
 #   {given_name}    — Имя и отчество
 #   {first_name}    — Имя
 #   {serial}        — Номер сертификата
 #   {sok_id}        — ID СОК
+#   {subject_id}    — Идентификатор в теме
 #   {unp}           — УНП
 #   {org}           — Организация
 #   {unit}          — Подразделение
@@ -38,8 +39,8 @@ InputFolder =
 OutputFolder = 
 
 [Naming]
-Preset = fio_serial_surname
-Template = {fio}_{serial}_{surname}
+Preset = CN_serial_surname
+Template = {CN}_{serial}_{surname}
 
 [Extract]
 Certificates = all

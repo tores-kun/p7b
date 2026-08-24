@@ -13,12 +13,13 @@ from asn1crypto import cms
 # Поля, доступные для подстановки в шаблон имени файла.
 # ключ -> (подпись для GUI, пример значения)
 FIELDS = OrderedDict([
-    ('fio',            ('CN (ФИО/наименование)',    'Иванов Иван Иванович')),
+    ('CN',             ('CN (ФИО/наименование)',    'Иванов Иван Иванович')),
     ('surname',        ('Фамилия',                  'Иванов')),
     ('given_name',     ('Имя и отчество',           'Иван Иванович')),
     ('first_name',     ('Имя',                      'Иван')),
     ('serial',         ('Номер сертификата',        '4d2a9f31e7')),
     ('sok_id',         ('ID СОК',                   '8ef85dc4ce04892f98303410923936870cedca33')),
+    ('subject_id',     ('Идентификатор в теме',     '1234567A890PB1')),
     ('unp',            ('УНП',                      '191234567')),
     ('org',            ('Организация',              'ООО Ромашка')),
     ('unit',           ('Подразделение',            'Бухгалтерия')),
@@ -32,24 +33,30 @@ FIELDS = OrderedDict([
 
 # Готовые варианты имени файла: ключ -> (подпись для GUI, шаблон)
 PRESETS = OrderedDict([
-    ('fio',                ('ФИО',                            '{fio}')),
+    ('CN',                 ('CN (ФИО/наименование)',          '{CN}')),
     ('surname',            ('Фамилия',                        '{surname}')),
     ('serial',             ('Номер сертификата',              '{serial}')),
     ('sok_id',             ('ID СОК',                         '{sok_id}')),
-    ('fio_serial',         ('ФИО + номер сертификата',        '{fio}_{serial}')),
+    ('CN_serial',          ('CN + номер сертификата',         '{CN}_{serial}')),
     ('surname_serial',     ('Фамилия + номер сертификата',    '{surname}_{serial}')),
-    ('fio_sok_id',         ('ФИО + ID СОК',                   '{fio}_{sok_id}')),
-    ('fio_serial_surname', ('ФИО + номер + фамилия',          '{fio}_{serial}_{surname}')),
+    ('CN_sok_id',          ('CN + ID СОК',                    '{CN}_{sok_id}')),
+    ('CN_serial_surname',  ('CN + номер + фамилия',           '{CN}_{serial}_{surname}')),
     ('custom',             ('Свой шаблон…',                   '')),
 ])
 
-DEFAULT_PRESET = 'fio_serial_surname'
+DEFAULT_PRESET = 'CN_serial_surname'
 DEFAULT_TEMPLATE = PRESETS[DEFAULT_PRESET][1]
 
 # Национальные OID ГосСУОК (см. "Перечень объектных уникальных идентификаторов" nces.by).
 # asn1crypto отдаёт неизвестные OID строкой, поэтому сверяем по окончанию.
 _UNP_OID_SUFFIX = '112.1.2.1.1.1.1.2'          # УНП — атрибут организации (tax-id)
 _ORG_UNIT_OID_SUFFIX = '112.1.2.1.1.5.2'       # Подразделение (org-unit) — в сертификатах ЮЛ
+_ORG_POSITION_OID_SUFFIX = '112.1.2.1.1.5.1'   # Место работы и должность (org-position)
+_PRIV_NUM_OID_SUFFIX = '112.1.2.1.1.1.1.1'     # Личный номер (priv-num) — в сертификатах ЮЛ
+
+# В реальных сертификатах ГосСУОК УНП, должность и личный номер представителя
+# оказались вынесены в extensions, а не в атрибуты subject (расходится с
+# профилем из ППС ЮЛ, но подтверждено разбором настоящего сертификата).
 
 _INVALID_CHARS = re.compile(r'[\\/*?:"<>|\x00-\x1f]')
 _PLACEHOLDER = re.compile(r'\{(\w+)\}')
@@ -174,17 +181,21 @@ def extract_fields(certificate):
     given_name = _text(subject.get('name'))
 
     return {
-        'fio': _text(subject.get('common_name')),
+        'CN': _text(subject.get('common_name')),
         'surname': _text(subject.get('surname')),
         'given_name': given_name,
         'first_name': _first_word(given_name),
         'serial': format(tbs['serial_number'].native, 'x'),
         'sok_id': _subject_key_identifier(certificate),
-        # УНП в сертификатах ЮЛ — отдельное расширение сертификата, не атрибут subject.
+        # УНП, личный номер и должность представителя ЮЛ — расширения сертификата,
+        # не атрибуты subject.
         'unp': _subject_oid(subject, _UNP_OID_SUFFIX) or _certificate_extension(certificate, _UNP_OID_SUFFIX),
+        'subject_id': _text(subject.get('serial_number')) or _certificate_extension(certificate, _PRIV_NUM_OID_SUFFIX),
         'org': _text(subject.get('organization_name')),
-        'unit': _text(subject.get('organizational_unit_name')) or _subject_oid(subject, _ORG_UNIT_OID_SUFFIX),
-        'position': _text(subject.get('title')),
+        'unit': (_text(subject.get('organizational_unit_name'))
+                 or _subject_oid(subject, _ORG_UNIT_OID_SUFFIX)
+                 or _certificate_extension(certificate, _ORG_UNIT_OID_SUFFIX)),
+        'position': _certificate_extension(certificate, _ORG_POSITION_OID_SUFFIX) or _text(subject.get('title')),
         'email': _text(subject.get('email_address')),
         'thumbprint': certificate.sha1.hex(),
         'valid_from': validity['not_before'].native.strftime('%Y-%m-%d'),
@@ -202,7 +213,7 @@ def build_filename(fields, template):
     """Подставить поля в шаблон и получить имя файла без расширения.
 
     Отсутствующие поля подставляются пустой строкой, лишние разделители
-    схлопываются — иначе шаблон «{fio}_{surname}» без фамилии дал бы «Иванов_».
+    схлопываются — иначе шаблон «{CN}_{surname}» без фамилии дал бы «Иванов_».
     """
     name = _PLACEHOLDER.sub(lambda match: fields.get(match.group(1), ''), template)
     name = clean_filename(name)
