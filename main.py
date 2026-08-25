@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import sys, os, logging
 from PyQt5.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout,
-                             QFileDialog, QMessageBox, QLabel, QSizePolicy, QComboBox,
-                             QLineEdit, QCheckBox, QMenu)
+                             QFileDialog, QMessageBox, QLabel, QComboBox,
+                             QLineEdit, QCheckBox, QMenu, QFormLayout)
 from PyQt5.QtCore import Qt
 from p7b import (parse_p7b_files, FIELDS, PRESETS, build_filename, template_for_preset,
                  example_fields, read_first_certificate_fields)
@@ -34,70 +34,59 @@ class CertificateParserApp(QWidget):
 
     def init_ui(self):
         self.setWindowTitle('Извлечение всех .cer из .p7b')
-        self.setGeometry(300, 300, 560, 620)
+        self.resize(600, 330)
+        self.setMinimumWidth(520)
 
-        # Load input and output folders from the configuration
-        if self.input_folder:
-            self.input_folder_label = QLabel(f'Выбрана папка: {self.input_folder}', self)
-        else:
-            self.input_folder_label = QLabel('Выберите папку с P7B-файлами:', self)
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(8)
 
-        self.input_folder_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 2px;")
+        # Папки: подпись слева, поле ввода (можно вписать путь вручную) + «Обзор…».
+        folders_form = QFormLayout()
+        folders_form.setSpacing(6)
+        folders_form.setLabelAlignment(Qt.AlignLeft)
 
-        # Внешний контейнер для группировки виджетов с текстом и кнопкой
-        input_container = QVBoxLayout()
-
-        input_folder_widget = QWidget(self)  # Виджет для объединения label и button
-        input_folder_layout = QVBoxLayout(input_folder_widget)
-        input_folder_layout.addWidget(self.input_folder_label)
-
-        self.input_folder_button = QPushButton('Выберите папку с P7B-файлами', self)
+        input_row = QHBoxLayout()
+        self.input_folder_edit = QLineEdit(self)
+        self.input_folder_edit.setText(self.input_folder)
+        self.input_folder_edit.setToolTip(self.input_folder)
+        self.input_folder_edit.setPlaceholderText(r'C:\certs\in')
+        self.input_folder_edit.textChanged.connect(self.on_input_folder_changed)
+        input_row.addWidget(self.input_folder_edit)
+        self.input_folder_button = QPushButton('Обзор…', self)
         self.input_folder_button.clicked.connect(self.select_input_folder)
-        self.input_folder_button.setStyleSheet("color: white; background-color: green; border-radius: 5px; padding: 2px; font-size: 14px; margin-top: 0px;")
-        input_folder_layout.addWidget(self.input_folder_button)
+        input_row.addWidget(self.input_folder_button)
+        folders_form.addRow('Папка с .p7b:', input_row)
 
-        # Установка размера для внешнего контейнера
-        input_folder_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        input_container.addWidget(input_folder_widget, alignment=Qt.AlignTop | Qt.AlignLeft)
-
-        # Output folder label initialization
-        if self.output_folder:
-            self.output_folder_label = QLabel(f'Выбрана папка: {self.output_folder}', self)
-        else:
-            self.output_folder_label = QLabel('Выберите папку куда будут извлечены .cer:', self)
-
-        self.output_folder_label.setStyleSheet("font-weight: bold; font-size: 14px; padding: 2px;")
-        output_container = QVBoxLayout()
-        output_folder_widget = QWidget(self)  # Виджет для объединения label и button
-        output_folder_layout = QVBoxLayout(output_folder_widget)
-        output_folder_layout.addWidget(self.output_folder_label)
-        self.output_folder_button = QPushButton('Выберите папку куда будут извлечены .cer', self)
+        output_row = QHBoxLayout()
+        self.output_folder_edit = QLineEdit(self)
+        self.output_folder_edit.setText(self.output_folder)
+        self.output_folder_edit.setToolTip(self.output_folder)
+        self.output_folder_edit.setPlaceholderText(r'C:\certs\out')
+        self.output_folder_edit.textChanged.connect(self.on_output_folder_changed)
+        output_row.addWidget(self.output_folder_edit)
+        self.output_folder_button = QPushButton('Обзор…', self)
         self.output_folder_button.clicked.connect(self.select_output_folder)
-        self.output_folder_button.setStyleSheet("color: white; background-color: green; border-radius: 5px; padding: 5px; font-size: 14px; margin-left: 0px;")
-        output_folder_layout.addWidget(self.output_folder_button)
-        output_folder_widget.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        output_container.addWidget(output_folder_widget, alignment=Qt.AlignTop | Qt.AlignLeft)
+        output_row.addWidget(self.output_folder_button)
+        folders_form.addRow('Папка для .cer:', output_row)
 
-        naming_container = self.build_naming_ui()
+        main_layout.addLayout(folders_form)
+        main_layout.addLayout(self.build_naming_ui())
+        main_layout.addStretch(1)
 
         self.run_button = QPushButton('Запустить', self)
         self.run_button.clicked.connect(self.run_parser)
-        self.run_button.setStyleSheet("color: white; background-color: green; border-radius: 5px; padding: 5px; font-size: 14px;")
+        self.run_button.setObjectName('runButton')
 
         self.author_label = QLabel('© Белоусов А.В.', self)
+        self.author_label.setObjectName('author')
 
-        button_layout = QVBoxLayout()
-        button_layout.addWidget(self.run_button, alignment=Qt.AlignTop | Qt.AlignRight)
-        button_layout.addWidget(self.author_label, alignment=Qt.AlignBottom | Qt.AlignRight)
+        footer_layout = QHBoxLayout()
+        footer_layout.addWidget(self.author_label, alignment=Qt.AlignLeft | Qt.AlignVCenter)
+        footer_layout.addStretch()
+        footer_layout.addWidget(self.run_button, alignment=Qt.AlignRight | Qt.AlignVCenter)
+        main_layout.addLayout(footer_layout)
 
-        main_layout = QVBoxLayout(self)
-        main_layout.addLayout(input_container)  
-        main_layout.addLayout(output_container)
-        main_layout.addLayout(naming_container)
-        main_layout.addLayout(button_layout)
-
-        # Применение стилей к виджетам через qss.
-        # Фоновой картинки нет, поэтому подложки под текстом больше не нужны.
+        # Применение стилей к виджетам через qss — единый блок вместо стиля на каждой кнопке.
         self.setStyleSheet("""
             CertificateParserApp {
                 background-color: #f1f4f2;
@@ -105,32 +94,67 @@ class CertificateParserApp(QWidget):
             QLabel {
                 color: black;
                 background-color: transparent;
-                padding: 5px;
+                padding: 1px;
             }
             QLabel#preview {
                 background-color: white;
                 border: 1px solid #c9d4cd;
                 border-radius: 5px;
+                padding: 5px;
                 font-style: italic;
+            }
+            QLabel#author {
+                color: #8a938d;
+                font-size: 11px;
+            }
+            QLineEdit, QComboBox {
+                background-color: white;
+                border: 1px solid #c9d4cd;
+                border-radius: 4px;
+                padding: 4px 6px;
+            }
+            QPushButton {
+                color: white;
+                background-color: #2e7d32;
+                border: none;
+                border-radius: 5px;
+                padding: 5px 12px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #256428;
+            }
+            QPushButton:pressed {
+                background-color: #1e501f;
+            }
+            QPushButton:disabled {
+                background-color: #a9c2ab;
+            }
+            QPushButton#runButton {
+                padding: 7px 22px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QCheckBox {
+                padding: 1px;
             }
         """)
 
     def build_naming_ui(self):
-        """Блок выбора имени сертификата: пресет, свой шаблон, предпросмотр."""
+        """Блок выбора имени сертификата: пресет, свой шаблон, предпросмотр, флажки."""
         naming_container = QVBoxLayout()
-        naming_widget = QWidget(self)
-        naming_layout = QVBoxLayout(naming_widget)
+        naming_container.setSpacing(6)
 
-        naming_title = QLabel('Из чего собирать имя файла сертификата:', self)
-        naming_title.setStyleSheet("font-weight: bold; font-size: 14px; padding: 2px;")
-        naming_layout.addWidget(naming_title)
+        naming_form = QFormLayout()
+        naming_form.setSpacing(6)
+        naming_form.setLabelAlignment(Qt.AlignLeft)
 
         self.preset_combo = QComboBox(self)
         for preset_key, (label, _template) in PRESETS.items():
             self.preset_combo.addItem(label, preset_key)
         self.preset_combo.setCurrentIndex(max(0, self.preset_combo.findData(self.settings.preset)))
         self.preset_combo.currentIndexChanged.connect(self.on_preset_changed)
-        naming_layout.addWidget(self.preset_combo)
+        naming_form.addRow('Имя файла из:', self.preset_combo)
 
         template_row = QHBoxLayout()
         self.template_edit = QLineEdit(self)
@@ -139,20 +163,25 @@ class CertificateParserApp(QWidget):
         template_row.addWidget(self.template_edit)
 
         self.insert_field_button = QPushButton('+ поле', self)
-        self.insert_field_button.setStyleSheet("color: white; background-color: green; border-radius: 5px; padding: 5px; font-size: 14px;")
         self.insert_field_button.setMenu(self.build_fields_menu())
         template_row.addWidget(self.insert_field_button)
-        naming_layout.addLayout(template_row)
+        naming_form.addRow('Шаблон:', template_row)
+
+        naming_container.addLayout(naming_form)
 
         self.preview_label = QLabel(self)
         self.preview_label.setObjectName('preview')
         self.preview_label.setWordWrap(True)
-        naming_layout.addWidget(self.preview_label)
+        naming_container.addWidget(self.preview_label)
+
+        checks_layout = QVBoxLayout()
+        checks_layout.setSpacing(2)
+        checks_layout.setContentsMargins(0, 4, 0, 0)
 
         self.only_user_certs_checkbox = QCheckBox('Только сертификаты пользователя (без вышестоящих УЦ)', self)
         self.only_user_certs_checkbox.setChecked(self.settings.only_user_certs)
         self.only_user_certs_checkbox.stateChanged.connect(self.on_only_user_certs_changed)
-        naming_layout.addWidget(self.only_user_certs_checkbox)
+        checks_layout.addWidget(self.only_user_certs_checkbox)
 
         self.extract_attribute_certs_checkbox = QCheckBox('Извлекать атрибутные сертификаты', self)
         self.extract_attribute_certs_checkbox.setChecked(self.settings.extract_attribute_certs)
@@ -160,16 +189,15 @@ class CertificateParserApp(QWidget):
             'AttributeCertificate из .p7b (обычно СОК ЮЛ, совмещённый с атрибутным сертификатом).\n'
             'Сохраняются отдельно, с расширением .acr.')
         self.extract_attribute_certs_checkbox.stateChanged.connect(self.on_extract_attribute_certs_changed)
-        naming_layout.addWidget(self.extract_attribute_certs_checkbox)
+        checks_layout.addWidget(self.extract_attribute_certs_checkbox)
 
         self.headless_checkbox = QCheckBox('Запускать без окна — сразу извлекать и закрываться', self)
         self.headless_checkbox.setChecked(not self.settings.show_gui)
         self.headless_checkbox.setToolTip('Чтобы снова открыть это окно, запустите программу с ключом --gui')
         self.headless_checkbox.stateChanged.connect(self.on_headless_changed)
-        naming_layout.addWidget(self.headless_checkbox)
+        checks_layout.addWidget(self.headless_checkbox)
 
-        naming_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        naming_container.addWidget(naming_widget, alignment=Qt.AlignTop)
+        naming_container.addLayout(checks_layout)
 
         self.apply_preset_to_template_edit()
         return naming_container
@@ -244,20 +272,26 @@ class CertificateParserApp(QWidget):
         self.preview_fields = read_first_certificate_fields(self.input_folder) or example_fields()
         self.update_preview()
 
+    def on_input_folder_changed(self, text):
+        self.input_folder_edit.setToolTip(text)
+        self.settings.input_folder = text
+        self.save_config()
+        self.reload_preview_fields()
+
+    def on_output_folder_changed(self, text):
+        self.output_folder_edit.setToolTip(text)
+        self.settings.output_folder = text
+        self.save_config()
+
     def select_input_folder(self):
         folder = QFileDialog.getExistingDirectory(self, 'Выберите папку ввода', self.input_folder or os.path.expanduser('~'))
         if folder:
-            self.input_folder_label.setText(f'Выбрана папка: {folder}')
-            self.settings.input_folder = folder
-            self.save_config()
-            self.reload_preview_fields()
+            self.input_folder_edit.setText(folder)
 
     def select_output_folder(self):
         folder = QFileDialog.getExistingDirectory(self, 'Выберите выходную папку', self.output_folder or os.path.expanduser('~'))
         if folder:
-            self.output_folder_label.setText(f'Выбрана папка: {folder}')
-            self.settings.output_folder = folder
-            self.save_config()
+            self.output_folder_edit.setText(folder)
 
     def run_parser(self):
             # Инициализация логгера при нажатии кнопки "Запустить"
