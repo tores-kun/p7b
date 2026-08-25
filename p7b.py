@@ -271,6 +271,32 @@ def is_excluded_from_user_certs(certificate):
     return is_ca_certificate(certificate) or is_attribute_service_certificate(certificate)
 
 
+def _der_sequence(value_bytes):
+    """DER-заголовок SEQUENCE (0x30, definite length) поверх готового содержимого."""
+    length = len(value_bytes)
+    if length < 0x80:
+        header = bytes([0x30, length])
+    else:
+        length_bytes = length.to_bytes((length.bit_length() + 7) // 8, 'big')
+        header = bytes([0x30, 0x80 | len(length_bytes)]) + length_bytes
+    return header + value_bytes
+
+
+def _attribute_cert_standalone_bytes(cert):
+    """DER атрибутного сертификата как самостоятельного объекта, а не как
+    альтернативы CHOICE CertificateChoices.
+
+    В CertificateChoices (RFC 5652) v1AttrCert/v2AttrCert помечены implicit-
+    тегами [1]/[2] — cert.dump() отдаёт байты с этим переопределённым тегом
+    (0xA1/0xA2) вместо родного универсального SEQUENCE (0x30). Такой файл
+    сторонние программы (например, АвЭст ПМС) не распознают как *.acr —
+    им нужен натуральный заголовок, как у самостоятельного AttributeCertificate.
+    Implicit-тег не меняет кодировку содержимого (contents) — просто строим
+    для него правильный внешний заголовок SEQUENCE вместо implicit-тега.
+    """
+    return _der_sequence(cert.chosen.contents)
+
+
 def _target_path(output_dir, base_name, serial, cert_bytes, extension='.cer'):
     """Путь для сохранения. None — такой сертификат уже сохранён раньше.
 
@@ -368,7 +394,7 @@ def _attribute_cert_org_fields(attr_cert):
     }
 
 
-def extract_attribute_fields(attr_cert, linked_fields=None):
+def extract_attribute_fields(attr_cert, standalone_bytes, linked_fields=None):
     """Поля атрибутного сертификата (AttributeCertificateV1/V2) для имени файла.
 
     У атрибутного сертификата нет subject в привычном смысле — ФИО и т.п.
@@ -376,7 +402,9 @@ def extract_attribute_fields(attr_cert, linked_fields=None):
     нашёлся в этом же .p7b; org/unit/position/unp сначала пробуем прочитать
     из собственного attrCertInfo.attributes АС (см. _attribute_cert_org_fields)
     и, если не вышло, тоже берём из связанного сертификата. serial/срок
-    действия/отпечаток — свои, этого атрибутного сертификата.
+    действия — свои, этого атрибутного сертификата; отпечаток считается от
+    standalone_bytes (см. _attribute_cert_standalone_bytes) — тех же байт,
+    что и сохраняются в файл.
     """
     ac_info = attr_cert['ac_info']
     validity = ac_info['att_cert_validity_period']
@@ -393,7 +421,7 @@ def extract_attribute_fields(attr_cert, linked_fields=None):
     fields['serial'] = format(ac_info['serial_number'].native, 'x')
     fields['valid_from'] = validity['not_before_time'].native.strftime('%Y-%m-%d')
     fields['valid_to'] = validity['not_after_time'].native.strftime('%Y-%m-%d')
-    fields['thumbprint'] = hashlib.sha1(attr_cert.dump()).hexdigest()
+    fields['thumbprint'] = hashlib.sha1(standalone_bytes).hexdigest()
     return fields
 
 
@@ -473,9 +501,10 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
                     continue
 
                 attr_cert = cert.chosen
+                standalone_bytes = _attribute_cert_standalone_bytes(cert)
                 linked_serial = _attribute_cert_holder_serial(attr_cert)
-                fields = extract_attribute_fields(attr_cert, fields_by_serial.get(linked_serial))
-                _save_extracted(output_dir, fields, template, cert.dump(), '.acr',
+                fields = extract_attribute_fields(attr_cert, standalone_bytes, fields_by_serial.get(linked_serial))
+                _save_extracted(output_dir, fields, template, standalone_bytes, '.acr',
                                  stats, 'Атрибутный сертификат', p7b_file_path, kind='attribute')
                 continue
 
