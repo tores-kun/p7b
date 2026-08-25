@@ -306,16 +306,17 @@ class CertificateParserApp(QWidget):
                                     only_user_certs=self.settings.only_user_certs,
                                     extract_attribute_certs=self.settings.extract_attribute_certs)
 
-            report = (f"Обработано файлов .p7b: {stats['files']}\n"
-                      f"Сохранено сертификатов: {stats['saved']}\n"
-                      f"Пропущено дубликатов: {stats['duplicates']}\n"
-                      f"Пропущено сертификатов УЦ: {stats['skipped_ca']}\n"
-                      f"Пропущено атрибутных сертификатов: {stats['skipped_attribute']}\n"
+            report = (f"Обработано файлов .p7b: {stats['files']}\n\n"
+                      f"Сертификаты: сохранено {stats['saved']}, дубликатов {stats['duplicates']}\n"
+                      f"Атрибутные сертификаты: сохранено {stats['saved_attribute']}, "
+                      f"дубликатов {stats['duplicates_attribute']}\n\n"
+                      f"Пропущено сертификатов УЦ/ЦАС: {stats['skipped_ca']}\n"
+                      f"Пропущено атрибутных (опция выключена): {stats['skipped_attribute']}\n"
                       f"Ошибок: {stats['errors']}")
-            if stats['saved']:
+            if stats['saved'] or stats['saved_attribute']:
                 QMessageBox.information(self, 'Готово', f'Извлечение завершено успешно!\n\n{report}')
             else:
-                QMessageBox.warning(self, 'Готово', f'Ни один сертификат не сохранён.\n\n{report}')
+                QMessageBox.warning(self, 'Готово', f'Ничего не сохранено.\n\n{report}')
 
 
 
@@ -352,13 +353,14 @@ def run_without_gui(settings):
                             only_user_certs=settings.only_user_certs,
                             extract_attribute_certs=settings.extract_attribute_certs)
 
-    report = ("Обработано файлов .p7b: {files}, сохранено сертификатов: {saved}, "
-              "дубликатов: {duplicates}, пропущено УЦ: {skipped_ca}, "
-              "пропущено атрибутных: {skipped_attribute}, "
+    report = ("Обработано файлов .p7b: {files}; "
+              "сертификатов сохранено: {saved}, дубликатов: {duplicates}; "
+              "атрибутных сохранено: {saved_attribute}, дубликатов: {duplicates_attribute}; "
+              "пропущено УЦ/ЦАС: {skipped_ca}, пропущено атрибутных: {skipped_attribute}; "
               "ошибок: {errors}".format(**stats))
     logging.info(report)
     echo(report)
-    return 0 if stats['saved'] else 1
+    return 0 if (stats['saved'] or stats['saved_attribute']) else 1
 
 
 def run_with_gui(settings):

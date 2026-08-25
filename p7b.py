@@ -397,17 +397,25 @@ def extract_attribute_fields(attr_cert, linked_fields=None):
     return fields
 
 
-def _save_extracted(output_dir, fields, template, cert_bytes, extension, stats, label, p7b_file_path):
-    """Сохранить извлечённый сертификат/атрибутный сертификат по шаблону имени."""
+def _save_extracted(output_dir, fields, template, cert_bytes, extension, stats, label, p7b_file_path, kind='cert'):
+    """Сохранить извлечённый сертификат/атрибутный сертификат по шаблону имени.
+
+    kind различает счётчики в stats: 'cert' -> saved/duplicates,
+    'attribute' -> saved_attribute/duplicates_attribute — чтобы в отчёте
+    обычные сертификаты и атрибутные не смешивались в одну сумму.
+    """
+    saved_key = 'saved' if kind == 'cert' else 'saved_attribute'
+    duplicates_key = 'duplicates' if kind == 'cert' else 'duplicates_attribute'
+
     base_name = build_filename(fields, template)
     cert_file_path = _target_path(output_dir, base_name, fields['serial'], cert_bytes, extension=extension)
     if cert_file_path is None:
-        stats['duplicates'] += 1
+        stats[duplicates_key] += 1
         logging.info("%s %s уже сохранён, пропускаем", label, base_name)
         return
     with open(cert_file_path, 'wb') as cert_file:
         cert_file.write(cert_bytes)
-    stats['saved'] += 1
+    stats[saved_key] += 1
     logging.info("%s сохранён в: %s", label, cert_file_path)
 
 
@@ -415,7 +423,7 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
               extract_attribute_certs=False, stats=None):
     """Извлечь сертификаты из одного .p7b."""
     if stats is None:
-        stats = {'saved': 0, 'duplicates': 0, 'skipped_ca': 0, 'skipped_attribute': 0, 'errors': 0, 'files': 0}
+        stats = {'saved': 0, 'duplicates': 0, 'saved_attribute': 0, 'duplicates_attribute': 0, 'skipped_ca': 0, 'skipped_attribute': 0, 'errors': 0, 'files': 0}
 
     try:
         with open(p7b_file_path, 'rb') as p7b_file:
@@ -468,7 +476,7 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
                 linked_serial = _attribute_cert_holder_serial(attr_cert)
                 fields = extract_attribute_fields(attr_cert, fields_by_serial.get(linked_serial))
                 _save_extracted(output_dir, fields, template, cert.dump(), '.acr',
-                                 stats, 'Атрибутный сертификат', p7b_file_path)
+                                 stats, 'Атрибутный сертификат', p7b_file_path, kind='attribute')
                 continue
 
             certificate = cert.chosen
@@ -493,7 +501,7 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
 def parse_p7b_files(input_folder, output_folder, template=DEFAULT_TEMPLATE, only_user_certs=False,
                      extract_attribute_certs=False):
     """Обработать все .p7b из входной папки. Возвращает статистику обработки."""
-    stats = {'saved': 0, 'duplicates': 0, 'skipped_ca': 0, 'skipped_attribute': 0, 'errors': 0, 'files': 0}
+    stats = {'saved': 0, 'duplicates': 0, 'saved_attribute': 0, 'duplicates_attribute': 0, 'skipped_ca': 0, 'skipped_attribute': 0, 'errors': 0, 'files': 0}
 
     if not input_folder or not os.path.isdir(input_folder):
         logging.error("Ошибка: Папка %s не существует.", input_folder)
@@ -551,6 +559,7 @@ if __name__ == "__main__":
         template=settings.template(),
         only_user_certs=settings.only_user_certs,
         extract_attribute_certs=settings.extract_attribute_certs)
-    print("Сохранено: {saved}, дубликатов: {duplicates}, "
-          "пропущено УЦ: {skipped_ca}, пропущено атрибутных: {skipped_attribute}, "
+    print("Сертификатов сохранено: {saved}, дубликатов: {duplicates}; "
+          "атрибутных сохранено: {saved_attribute}, дубликатов: {duplicates_attribute}; "
+          "пропущено УЦ/ЦАС: {skipped_ca}, пропущено атрибутных (опция выключена): {skipped_attribute}; "
           "ошибок: {errors}".format(**result))
