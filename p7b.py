@@ -244,6 +244,33 @@ def is_ca_certificate(certificate):
     return tbs['subject'].native == tbs['issuer'].native
 
 
+# ППС атрибутных сертификатов (СТБ 34.101.19/67, "attribute-rca"): служебный СОК
+# ЦАС, подписывающий атрибутные сертификаты и их СОАС. По X.509 это не CA
+# (basicConstraints.ca=False, key_cert_sign в keyUsage нет), поэтому
+# is_ca_certificate() его не ловит — опознаём отдельно, по политике сертификата.
+_ATTRIBUTE_SERVICE_POLICY_OID = '1.2.112.1.2.1.1.1.3.2.3'
+
+
+def is_attribute_service_certificate(certificate):
+    """СОК службы атрибутных сертификатов (ЦАС) — не пользовательский и не CA."""
+    try:
+        policies = certificate.certificate_policies_value
+        if policies is None:
+            return False
+        return any(
+            policy['policy_identifier'].dotted == _ATTRIBUTE_SERVICE_POLICY_OID
+            for policy in policies
+        )
+    except (ValueError, KeyError, AttributeError):
+        return False
+
+
+def is_excluded_from_user_certs(certificate):
+    """Сертификаты, которые флажок «Только сертификаты пользователя» должен убрать:
+    вышестоящие УЦ и служебный СОК ЦАС (службы атрибутных сертификатов)."""
+    return is_ca_certificate(certificate) or is_attribute_service_certificate(certificate)
+
+
 def _target_path(output_dir, base_name, serial, cert_bytes, extension='.cer'):
     """Путь для сохранения. None — такой сертификат уже сохранён раньше.
 
@@ -445,9 +472,9 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
                 continue
 
             certificate = cert.chosen
-            if only_user_certs and is_ca_certificate(certificate):
+            if only_user_certs and is_excluded_from_user_certs(certificate):
                 stats['skipped_ca'] += 1
-                logging.info("Пропущен сертификат УЦ из %s (#%s)", p7b_file_path, index)
+                logging.info("Пропущен сертификат УЦ/ЦАС из %s (#%s)", p7b_file_path, index)
                 continue
 
             fields = extract_fields(certificate)
@@ -486,7 +513,7 @@ def parse_p7b_files(input_folder, output_folder, template=DEFAULT_TEMPLATE, only
 
 
 def read_first_certificate_fields(input_folder):
-    """Поля первого найденного сертификата — для предпросмотра имени в GUI."""
+    """Поля первого найденного пользовательского сертификата — для предпросмотра имени в GUI."""
     if not input_folder or not os.path.isdir(input_folder):
         return None
     for filename in sorted(os.listdir(input_folder)):
@@ -496,8 +523,10 @@ def read_first_certificate_fields(input_folder):
             with open(os.path.join(input_folder, filename), 'rb') as p7b_file:
                 content_info = cms.ContentInfo.load(p7b_file.read())
             for cert in content_info['content']['certificates']:
+                if cert.name != 'certificate':
+                    continue
                 certificate = cert.chosen
-                if not is_ca_certificate(certificate):
+                if not is_excluded_from_user_certs(certificate):
                     return extract_fields(certificate)
         except Exception:
             continue
