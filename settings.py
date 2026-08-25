@@ -34,6 +34,9 @@ def _header():
         "# Extract.Certificates:\n"
         "#   all  — извлекать все сертификаты, включая вышестоящие (УЦ)\n"
         "#   user — только сертификаты пользователя\n"
+        "# Extract.AttributeCertificates:\n"
+        "#   no  — атрибутные сертификаты (AttributeCertificate) пропускаются\n"
+        "#   yes — извлекать и их тоже, в файлы .acr\n"
         "#\n"
         "# General.ShowGui:\n"
         "#   yes — при запуске открывается окно программы\n"
@@ -52,6 +55,7 @@ class Settings:
         self.preset = p7b.DEFAULT_PRESET
         self.custom_template = p7b.DEFAULT_TEMPLATE
         self.only_user_certs = False
+        self.extract_attribute_certs = False
         self.show_gui = True
 
     def load(self):
@@ -74,6 +78,12 @@ class Settings:
 
         certificates = parser.get('Extract', 'Certificates', fallback=ALL_CERTIFICATES).strip().lower()
         self.only_user_certs = certificates == USER_CERTIFICATES
+
+        try:
+            self.extract_attribute_certs = parser.getboolean(
+                'Extract', 'AttributeCertificates', fallback=False)
+        except ValueError:
+            self.extract_attribute_certs = False
 
         try:
             self.show_gui = parser.getboolean('General', 'ShowGui', fallback=True)
@@ -99,6 +109,7 @@ class Settings:
             "\n"
             "[Extract]\n"
             "Certificates = {certificates}\n"
+            "AttributeCertificates = {attribute_certificates}\n"
             "\n"
             "[General]\n"
             "ShowGui = {show_gui}\n"
@@ -108,6 +119,7 @@ class Settings:
             preset=self.preset,
             template=self.custom_template,
             certificates=USER_CERTIFICATES if self.only_user_certs else ALL_CERTIFICATES,
+            attribute_certificates='yes' if self.extract_attribute_certs else 'no',
             show_gui='yes' if self.show_gui else 'no',
         )
         with open(self.path, 'w', encoding='utf-8') as config_file:

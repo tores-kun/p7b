@@ -154,6 +154,14 @@ class CertificateParserApp(QWidget):
         self.only_user_certs_checkbox.stateChanged.connect(self.on_only_user_certs_changed)
         naming_layout.addWidget(self.only_user_certs_checkbox)
 
+        self.extract_attribute_certs_checkbox = QCheckBox('Извлекать атрибутные сертификаты', self)
+        self.extract_attribute_certs_checkbox.setChecked(self.settings.extract_attribute_certs)
+        self.extract_attribute_certs_checkbox.setToolTip(
+            'AttributeCertificate из .p7b (обычно СОК ЮЛ, совмещённый с атрибутным сертификатом).\n'
+            'Сохраняются отдельно, с расширением .acr.')
+        self.extract_attribute_certs_checkbox.stateChanged.connect(self.on_extract_attribute_certs_changed)
+        naming_layout.addWidget(self.extract_attribute_certs_checkbox)
+
         self.headless_checkbox = QCheckBox('Запускать без окна — сразу извлекать и закрываться', self)
         self.headless_checkbox.setChecked(not self.settings.show_gui)
         self.headless_checkbox.setToolTip('Чтобы снова открыть это окно, запустите программу с ключом --gui')
@@ -209,6 +217,10 @@ class CertificateParserApp(QWidget):
         self.settings.only_user_certs = bool(state)
         self.save_config()
 
+    def on_extract_attribute_certs_changed(self, state):
+        self.settings.extract_attribute_certs = bool(state)
+        self.save_config()
+
     def on_headless_changed(self, state):
         self.settings.show_gui = not state
         self.save_config()
@@ -257,12 +269,14 @@ class CertificateParserApp(QWidget):
 
             stats = parse_p7b_files(self.input_folder, self.output_folder,
                                     template=self.current_template(),
-                                    only_user_certs=self.settings.only_user_certs)
+                                    only_user_certs=self.settings.only_user_certs,
+                                    extract_attribute_certs=self.settings.extract_attribute_certs)
 
             report = (f"Обработано файлов .p7b: {stats['files']}\n"
                       f"Сохранено сертификатов: {stats['saved']}\n"
                       f"Пропущено дубликатов: {stats['duplicates']}\n"
                       f"Пропущено сертификатов УЦ: {stats['skipped_ca']}\n"
+                      f"Пропущено атрибутных сертификатов: {stats['skipped_attribute']}\n"
                       f"Ошибок: {stats['errors']}")
             if stats['saved']:
                 QMessageBox.information(self, 'Готово', f'Извлечение завершено успешно!\n\n{report}')
@@ -301,10 +315,12 @@ def run_without_gui(settings):
 
     stats = parse_p7b_files(settings.input_folder, settings.output_folder,
                             template=settings.template(),
-                            only_user_certs=settings.only_user_certs)
+                            only_user_certs=settings.only_user_certs,
+                            extract_attribute_certs=settings.extract_attribute_certs)
 
     report = ("Обработано файлов .p7b: {files}, сохранено сертификатов: {saved}, "
               "дубликатов: {duplicates}, пропущено УЦ: {skipped_ca}, "
+              "пропущено атрибутных: {skipped_attribute}, "
               "ошибок: {errors}".format(**stats))
     logging.info(report)
     echo(report)

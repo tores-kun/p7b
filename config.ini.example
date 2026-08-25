@@ -26,6 +26,9 @@
 # Extract.Certificates:
 #   all  — извлекать все сертификаты, включая вышестоящие (УЦ)
 #   user — только сертификаты пользователя
+# Extract.AttributeCertificates:
+#   no  — атрибутные сертификаты (AttributeCertificate) пропускаются
+#   yes — извлекать и их тоже, в файлы .acr
 #
 # General.ShowGui:
 #   yes — при запуске открывается окно программы
@@ -44,6 +47,7 @@ Template = {CN}_{serial}_{surname}
 
 [Extract]
 Certificates = all
+AttributeCertificates = no
 
 [General]
 ShowGui = yes

@@ -6,9 +6,10 @@
 import os
 import re
 import logging
+import hashlib
 from collections import OrderedDict
 
-from asn1crypto import cms
+from asn1crypto import cms, x509
 
 # Поля, доступные для подстановки в шаблон имени файла.
 # ключ -> (подпись для GUI, пример значения)
@@ -243,7 +244,7 @@ def is_ca_certificate(certificate):
     return tbs['subject'].native == tbs['issuer'].native
 
 
-def _target_path(output_dir, base_name, serial, cert_bytes):
+def _target_path(output_dir, base_name, serial, cert_bytes, extension='.cer'):
     """Путь для сохранения. None — такой сертификат уже сохранён раньше.
 
     При совпадении имён к имени дописывается номер сертификата (выбор
@@ -255,7 +256,7 @@ def _target_path(output_dir, base_name, serial, cert_bytes):
     candidates.extend('{}_{}_{}'.format(base_name, serial, i) for i in range(1, 100))
 
     for candidate in candidates:
-        path = os.path.join(output_dir, clean_filename(candidate) + '.cer')
+        path = os.path.join(output_dir, clean_filename(candidate) + extension)
         if not os.path.exists(path):
             return path
         try:
@@ -267,10 +268,127 @@ def _target_path(output_dir, base_name, serial, cert_bytes):
     return None
 
 
-def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_certs=False, stats=None):
+def _attribute_cert_holder_serial(attr_cert):
+    """Serial X.509-сертификата, к которому привязан атрибутный (Holder.baseCertificateID).
+
+    В ГосСУОК атрибутный сертификат обычно выпускается в паре с обычным
+    сертификатом того же владельца — по этой ссылке подтягиваем его ФИО/
+    организацию для имени файла.
+    """
+    try:
+        base_id = attr_cert['ac_info']['holder']['base_certificate_id']
+        if base_id.native is None:
+            return ''
+        return format(base_id['serial'].native, 'x')
+    except (ValueError, KeyError, AttributeError, TypeError):
+        return ''
+
+
+def _attribute_cert_attributes_raw(attr_cert):
+    """Сырой словарь attrCertInfo.attributes (АС ГосСУОК, СТБ 34.101.67-2014).
+
+    Профиль описывает это поле как плоский набор атрибутов (countryName,
+    organizationName, title, УНП и т.д.) — по оформлению документа похоже
+    на RDN-последовательность (как subject обычного сертификата), а не на
+    стандартный RFC 5755 SET OF Attribute. Точный ASN.1-тег не подтверждён
+    на реальном образце, поэтому пробуем оба варианта декодирования и молча
+    возвращаем пустой словарь, если не подошёл ни один — хуже, чем пустое
+    поле, от этого не станет.
+    """
+    try:
+        raw = attr_cert['ac_info']['attributes'].dump()
+    except (ValueError, KeyError, AttributeError):
+        return {}
+
+    try:
+        native = x509.Name.load(raw).native
+        if native:
+            return native
+    except Exception:
+        pass
+
+    result = {}
+    try:
+        for attribute in cms.Attributes.load(raw):
+            values = attribute['values']
+            if len(values):
+                result[attribute['type'].dotted] = _text(values[0].native)
+    except Exception:
+        pass
+    return result
+
+
+def _attribute_cert_org_fields(attr_cert):
+    """org/unit/position/unp из attrCertInfo.attributes, если удалось прочитать."""
+    raw = _attribute_cert_attributes_raw(attr_cert)
+    if not raw:
+        return {}
+
+    def get(name_key, oid_suffix):
+        value = raw.get(name_key)
+        if value:
+            return _text(value)
+        for key, val in raw.items():
+            if isinstance(key, str) and key.endswith(oid_suffix):
+                return _text(val)
+        return ''
+
+    return {
+        'org': get('organization_name', '2.5.4.10'),
+        'unit': get('organizational_unit_name', '2.5.4.11'),
+        'position': get('title', '2.5.4.12'),
+        'unp': get('', _UNP_OID_SUFFIX),
+    }
+
+
+def extract_attribute_fields(attr_cert, linked_fields=None):
+    """Поля атрибутного сертификата (AttributeCertificateV1/V2) для имени файла.
+
+    У атрибутного сертификата нет subject в привычном смысле — ФИО и т.п.
+    берутся из связанного X.509-сертификата (linked_fields), если он
+    нашёлся в этом же .p7b; org/unit/position/unp сначала пробуем прочитать
+    из собственного attrCertInfo.attributes АС (см. _attribute_cert_org_fields)
+    и, если не вышло, тоже берём из связанного сертификата. serial/срок
+    действия/отпечаток — свои, этого атрибутного сертификата.
+    """
+    ac_info = attr_cert['ac_info']
+    validity = ac_info['att_cert_validity_period']
+
+    fields = {key: '' for key in FIELDS}
+    if linked_fields:
+        fields.update(linked_fields)
+
+    own_org_fields = _attribute_cert_org_fields(attr_cert)
+    for key in ('org', 'unit', 'position', 'unp'):
+        if own_org_fields.get(key):
+            fields[key] = own_org_fields[key]
+
+    fields['serial'] = format(ac_info['serial_number'].native, 'x')
+    fields['valid_from'] = validity['not_before_time'].native.strftime('%Y-%m-%d')
+    fields['valid_to'] = validity['not_after_time'].native.strftime('%Y-%m-%d')
+    fields['thumbprint'] = hashlib.sha1(attr_cert.dump()).hexdigest()
+    return fields
+
+
+def _save_extracted(output_dir, fields, template, cert_bytes, extension, stats, label, p7b_file_path):
+    """Сохранить извлечённый сертификат/атрибутный сертификат по шаблону имени."""
+    base_name = build_filename(fields, template)
+    cert_file_path = _target_path(output_dir, base_name, fields['serial'], cert_bytes, extension=extension)
+    if cert_file_path is None:
+        stats['duplicates'] += 1
+        logging.info("%s %s уже сохранён, пропускаем", label, base_name)
+        return
+    with open(cert_file_path, 'wb') as cert_file:
+        cert_file.write(cert_bytes)
+    stats['saved'] += 1
+    logging.info("%s сохранён в: %s", label, cert_file_path)
+
+
+def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_certs=False,
+              extract_attribute_certs=False, stats=None):
     """Извлечь сертификаты из одного .p7b."""
     if stats is None:
-        stats = {'saved': 0, 'duplicates': 0, 'skipped_ca': 0, 'errors': 0, 'files': 0}
+        stats = {'saved': 0, 'duplicates': 0, 'skipped_ca': 0, 'skipped_attribute': 0, 'errors': 0, 'files': 0}
 
     try:
         with open(p7b_file_path, 'rb') as p7b_file:
@@ -293,8 +411,39 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
 
     stats['files'] += 1
 
+    # Атрибутные сертификаты ссылаются на «базовый» X.509-сертификат того же
+    # владельца по serial (Holder.baseCertificateID) — строим карту заранее,
+    # независимо от порядка записей внутри .p7b.
+    fields_by_serial = {}
+    if extract_attribute_certs:
+        for cert in certificates:
+            if cert.name == 'certificate':
+                try:
+                    fields = extract_fields(cert.chosen)
+                    fields_by_serial[fields['serial']] = fields
+                except Exception:
+                    continue
+
     for index, cert in enumerate(certificates):
         try:
+            if cert.name != 'certificate':
+                if not (extract_attribute_certs and cert.name in ('v1_attr_cert', 'v2_attr_cert')):
+                    # СОК ЮЛ в ГосСУОК бывает совмещён с атрибутным сертификатом
+                    # (AttributeCertificateV1/V2) — это не X.509-сертификат,
+                    # извлекать/сохранять как .cer нечего (если не включена опция).
+                    stats['skipped_attribute'] += 1
+                    logging.info(
+                        "Пропущена запись #%s из %s: не X.509-сертификат (%s)",
+                        index, p7b_file_path, cert.name)
+                    continue
+
+                attr_cert = cert.chosen
+                linked_serial = _attribute_cert_holder_serial(attr_cert)
+                fields = extract_attribute_fields(attr_cert, fields_by_serial.get(linked_serial))
+                _save_extracted(output_dir, fields, template, cert.dump(), '.acr',
+                                 stats, 'Атрибутный сертификат', p7b_file_path)
+                continue
+
             certificate = cert.chosen
             if only_user_certs and is_ca_certificate(certificate):
                 stats['skipped_ca'] += 1
@@ -302,19 +451,8 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
                 continue
 
             fields = extract_fields(certificate)
-            base_name = build_filename(fields, template)
-            cert_bytes = cert.dump()
-
-            cert_file_path = _target_path(output_dir, base_name, fields['serial'], cert_bytes)
-            if cert_file_path is None:
-                stats['duplicates'] += 1
-                logging.info("Сертификат %s уже сохранён, пропускаем", base_name)
-                continue
-
-            with open(cert_file_path, 'wb') as cert_file:
-                cert_file.write(cert_bytes)
-            stats['saved'] += 1
-            logging.info("Сертификат сохранен в: %s", cert_file_path)
+            _save_extracted(output_dir, fields, template, cert.dump(), '.cer',
+                             stats, 'Сертификат', p7b_file_path)
         except Exception as error:
             stats['errors'] += 1
             logging.warning(
@@ -325,9 +463,10 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
     return stats
 
 
-def parse_p7b_files(input_folder, output_folder, template=DEFAULT_TEMPLATE, only_user_certs=False):
+def parse_p7b_files(input_folder, output_folder, template=DEFAULT_TEMPLATE, only_user_certs=False,
+                     extract_attribute_certs=False):
     """Обработать все .p7b из входной папки. Возвращает статистику обработки."""
-    stats = {'saved': 0, 'duplicates': 0, 'skipped_ca': 0, 'errors': 0, 'files': 0}
+    stats = {'saved': 0, 'duplicates': 0, 'skipped_ca': 0, 'skipped_attribute': 0, 'errors': 0, 'files': 0}
 
     if not input_folder or not os.path.isdir(input_folder):
         logging.error("Ошибка: Папка %s не существует.", input_folder)
@@ -340,7 +479,8 @@ def parse_p7b_files(input_folder, output_folder, template=DEFAULT_TEMPLATE, only
     for filename in sorted(os.listdir(input_folder)):
         if filename.lower().endswith('.p7b'):
             parse_p7b(os.path.join(input_folder, filename), output_folder,
-                      template=template, only_user_certs=only_user_certs, stats=stats)
+                      template=template, only_user_certs=only_user_certs,
+                      extract_attribute_certs=extract_attribute_certs, stats=stats)
 
     return stats
 
@@ -380,6 +520,8 @@ if __name__ == "__main__":
         settings.input_folder or r'./in',
         settings.output_folder or r'./out',
         template=settings.template(),
-        only_user_certs=settings.only_user_certs)
+        only_user_certs=settings.only_user_certs,
+        extract_attribute_certs=settings.extract_attribute_certs)
     print("Сохранено: {saved}, дубликатов: {duplicates}, "
-          "пропущено УЦ: {skipped_ca}, ошибок: {errors}".format(**result))
+          "пропущено УЦ: {skipped_ca}, пропущено атрибутных: {skipped_attribute}, "
+          "ошибок: {errors}".format(**result))
