@@ -4,7 +4,8 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QPushButton, QVBoxLayout, QH
                              QFileDialog, QMessageBox, QLabel, QComboBox,
                              QLineEdit, QCheckBox, QMenu, QFormLayout)
 from PyQt5.QtCore import Qt
-from p7b import (parse_p7b_files, FIELDS, PRESETS, build_filename, template_for_preset,
+from p7b import (parse_p7b_files, FIELDS, PRESETS, DATE_FORMATS, build_filename,
+                 template_for_preset, date_format_for_preset,
                  example_fields, read_first_certificate_fields)
 from settings import Settings
 from datetime import datetime
@@ -167,6 +168,25 @@ class CertificateParserApp(QWidget):
         template_row.addWidget(self.insert_field_button)
         naming_form.addRow('Шаблон:', template_row)
 
+        # Формат дат нужен, только если в шаблоне есть {valid_from}/{valid_to}.
+        date_row = QHBoxLayout()
+        self.date_format_combo = QComboBox(self)
+        for key, (label, _fmt) in DATE_FORMATS.items():
+            self.date_format_combo.addItem(label, key)
+        self.date_format_combo.setCurrentIndex(
+            max(0, self.date_format_combo.findData(self.settings.date_format_preset)))
+        self.date_format_combo.currentIndexChanged.connect(self.on_date_format_preset_changed)
+        date_row.addWidget(self.date_format_combo)
+
+        self.date_format_edit = QLineEdit(self)
+        self.date_format_edit.setPlaceholderText('%d.%m.%Y')
+        self.date_format_edit.setToolTip(
+            'Коды strftime: %Y — год (2026), %m — месяц (08), %d — день (21).\n'
+            'Например: %Y — только год, %d.%m.%Y — 21.08.2026.')
+        self.date_format_edit.textChanged.connect(self.on_date_format_changed)
+        date_row.addWidget(self.date_format_edit)
+        naming_form.addRow('Формат даты:', date_row)
+
         naming_container.addLayout(naming_form)
 
         self.preview_label = QLabel(self)
@@ -200,6 +220,7 @@ class CertificateParserApp(QWidget):
         naming_container.addLayout(checks_layout)
 
         self.apply_preset_to_template_edit()
+        self.apply_date_format_preset_to_edit()
         return naming_container
 
     def build_fields_menu(self):
@@ -241,6 +262,32 @@ class CertificateParserApp(QWidget):
             self.save_config()
         self.update_preview()
 
+    def current_date_format_preset(self):
+        return self.date_format_combo.currentData()
+
+    def apply_date_format_preset_to_edit(self):
+        """Для готового формата даты показываем его строку только для чтения."""
+        preset = self.current_date_format_preset()
+        is_custom = preset == 'custom'
+        self.date_format_edit.setEnabled(is_custom)
+
+        self.date_format_edit.blockSignals(True)
+        self.date_format_edit.setText(
+            date_format_for_preset(preset, self.settings.custom_date_format))
+        self.date_format_edit.blockSignals(False)
+        self.reload_preview_fields()
+
+    def on_date_format_preset_changed(self):
+        self.settings.date_format_preset = self.current_date_format_preset()
+        self.apply_date_format_preset_to_edit()
+        self.save_config()
+
+    def on_date_format_changed(self, text):
+        if self.current_date_format_preset() == 'custom':
+            self.settings.custom_date_format = text
+            self.save_config()
+        self.reload_preview_fields()
+
     def on_only_user_certs_changed(self, state):
         self.settings.only_user_certs = bool(state)
         self.save_config()
@@ -263,13 +310,19 @@ class CertificateParserApp(QWidget):
     def current_template(self):
         return self.template_edit.text() or template_for_preset(self.current_preset())
 
+    def current_date_format(self):
+        return (self.date_format_edit.text()
+                or date_format_for_preset(self.current_date_format_preset()))
+
     def update_preview(self):
         filename = build_filename(self.preview_fields, self.current_template())
         self.preview_label.setText(f'Пример имени файла: {filename}.cer')
 
     def reload_preview_fields(self):
         """Предпросмотр по первому реальному сертификату, иначе по примеру."""
-        self.preview_fields = read_first_certificate_fields(self.input_folder) or example_fields()
+        date_format = self.current_date_format()
+        self.preview_fields = (read_first_certificate_fields(self.input_folder, date_format)
+                               or example_fields(date_format))
         self.update_preview()
 
     def on_input_folder_changed(self, text):
@@ -304,7 +357,8 @@ class CertificateParserApp(QWidget):
             stats = parse_p7b_files(self.input_folder, self.output_folder,
                                     template=self.current_template(),
                                     only_user_certs=self.settings.only_user_certs,
-                                    extract_attribute_certs=self.settings.extract_attribute_certs)
+                                    extract_attribute_certs=self.settings.extract_attribute_certs,
+                                    date_format=self.current_date_format())
 
             report = (f"Обработано файлов .p7b: {stats['files']}\n\n"
                       f"Сертификаты: сохранено {stats['saved']}, дубликатов {stats['duplicates']}\n"
@@ -351,7 +405,8 @@ def run_without_gui(settings):
     stats = parse_p7b_files(settings.input_folder, settings.output_folder,
                             template=settings.template(),
                             only_user_certs=settings.only_user_certs,
-                            extract_attribute_certs=settings.extract_attribute_certs)
+                            extract_attribute_certs=settings.extract_attribute_certs,
+                            date_format=settings.date_format())
 
     report = ("Обработано файлов .p7b: {files}; "
               "сертификатов сохранено: {saved}, дубликатов: {duplicates}; "

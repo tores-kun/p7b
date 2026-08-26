@@ -20,6 +20,7 @@ def _header():
     fields = '\n'.join(
         '#   {{{0}}}{1}— {2}'.format(key, ' ' * max(1, 14 - len(key)), label)
         for key, (label, _example) in p7b.FIELDS.items())
+    date_presets = ' | '.join(p7b.DATE_FORMATS)
     return (
         "# Настройки извлечения сертификатов из .p7b.\n"
         "# Файл читают и GUI, и запуск из консоли (python p7b.py).\n"
@@ -30,6 +31,12 @@ def _header():
         "# Naming.Template используется, когда Preset = custom.\n"
         "# Поля, доступные в шаблоне:\n"
         "{fields}\n"
+        "#\n"
+        "# Naming.DateFormatPreset — формат дат {{valid_from}}/{{valid_to}}, одно из:\n"
+        "#   {date_presets}\n"
+        "# Naming.DateFormat используется, когда DateFormatPreset = custom,\n"
+        "# и задаётся кодами strftime: %Y — год (2026), %m — месяц, %d — день.\n"
+        "# Например: %Y — только год, %d.%m.%Y — 21.08.2026, %m-%Y — 08-2026.\n"
         "#\n"
         "# Extract.Certificates:\n"
         "#   all  — извлекать все сертификаты, включая вышестоящие (УЦ)\n"
@@ -44,7 +51,7 @@ def _header():
         "#         и программа закрывается (результат — в файле log_*.txt)\n"
         "# Открыть окно при ShowGui = no: запустить с ключом --gui\n"
         "# Разово запустить без окна при ShowGui = yes: ключ --no-gui\n"
-        "\n".format(presets=presets, fields=fields))
+        "\n".format(presets=presets, fields=fields, date_presets=date_presets))
 
 
 class Settings:
@@ -54,6 +61,8 @@ class Settings:
         self.output_folder = ''
         self.preset = p7b.DEFAULT_PRESET
         self.custom_template = p7b.DEFAULT_TEMPLATE
+        self.date_format_preset = p7b.DEFAULT_DATE_FORMAT_PRESET
+        self.custom_date_format = p7b.DEFAULT_DATE_FORMAT
         self.only_user_certs = False
         self.extract_attribute_certs = False
         self.show_gui = True
@@ -62,7 +71,9 @@ class Settings:
         if not os.path.exists(self.path):
             return self
 
-        parser = configparser.ConfigParser()
+        # interpolation=None: в форматах даты есть «%» (%Y, %d.%m.%Y),
+        # а стандартная интерполяция ConfigParser считает его спецсимволом.
+        parser = configparser.ConfigParser(interpolation=None)
         try:
             parser.read(self.path, encoding='utf-8')
         except (configparser.Error, UnicodeDecodeError):
@@ -75,6 +86,13 @@ class Settings:
         self.preset = preset if preset in p7b.PRESETS else p7b.DEFAULT_PRESET
         self.custom_template = parser.get(
             'Naming', 'Template', fallback=p7b.DEFAULT_TEMPLATE).strip() or p7b.DEFAULT_TEMPLATE
+
+        date_preset = parser.get(
+            'Naming', 'DateFormatPreset', fallback=p7b.DEFAULT_DATE_FORMAT_PRESET).strip()
+        self.date_format_preset = (
+            date_preset if date_preset in p7b.DATE_FORMATS else p7b.DEFAULT_DATE_FORMAT_PRESET)
+        self.custom_date_format = parser.get(
+            'Naming', 'DateFormat', fallback=p7b.DEFAULT_DATE_FORMAT).strip() or p7b.DEFAULT_DATE_FORMAT
 
         certificates = parser.get('Extract', 'Certificates', fallback=ALL_CERTIFICATES).strip().lower()
         self.only_user_certs = certificates == USER_CERTIFICATES
@@ -106,6 +124,8 @@ class Settings:
             "[Naming]\n"
             "Preset = {preset}\n"
             "Template = {template}\n"
+            "DateFormatPreset = {date_format_preset}\n"
+            "DateFormat = {date_format}\n"
             "\n"
             "[Extract]\n"
             "Certificates = {certificates}\n"
@@ -118,6 +138,8 @@ class Settings:
             output_folder=self.output_folder or '',
             preset=self.preset,
             template=self.custom_template,
+            date_format_preset=self.date_format_preset,
+            date_format=self.custom_date_format,
             certificates=USER_CERTIFICATES if self.only_user_certs else ALL_CERTIFICATES,
             attribute_certificates='yes' if self.extract_attribute_certs else 'no',
             show_gui='yes' if self.show_gui else 'no',
@@ -129,3 +151,7 @@ class Settings:
     def template(self):
         """Шаблон имени файла с учётом выбранного пресета."""
         return p7b.template_for_preset(self.preset, self.custom_template)
+
+    def date_format(self):
+        """Формат дат {valid_from}/{valid_to} с учётом выбранного пресета."""
+        return p7b.date_format_for_preset(self.date_format_preset, self.custom_date_format)

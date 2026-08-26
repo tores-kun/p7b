@@ -23,6 +23,12 @@
 #   {valid_to}      — Действителен по
 #   {issuer}        — Издатель
 #
+# Naming.DateFormatPreset — формат дат {valid_from}/{valid_to}, одно из:
+#   iso | ru_dot | ru_dash | compact | month | year | custom
+# Naming.DateFormat используется, когда DateFormatPreset = custom,
+# и задаётся кодами strftime: %Y — год (2026), %m — месяц, %d — день.
+# Например: %Y — только год, %d.%m.%Y — 21.08.2026, %m-%Y — 08-2026.
+#
 # Extract.Certificates:
 #   all  — извлекать все сертификаты, включая вышестоящие (УЦ)
 #   user — только сертификаты пользователя
@@ -44,6 +50,8 @@ OutputFolder =
 [Naming]
 Preset = CN_serial_surname
 Template = {CN}_{serial}_{surname}
+DateFormatPreset = iso
+DateFormat = %Y-%m-%d
 
 [Extract]
 Certificates = all

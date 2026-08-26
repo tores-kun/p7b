@@ -8,6 +8,7 @@ import re
 import logging
 import hashlib
 from collections import OrderedDict
+from datetime import datetime
 
 from asn1crypto import cms, x509
 
@@ -47,6 +48,40 @@ PRESETS = OrderedDict([
 
 DEFAULT_PRESET = 'CN_serial_surname'
 DEFAULT_TEMPLATE = PRESETS[DEFAULT_PRESET][1]
+
+# Готовые форматы даты для {valid_from}/{valid_to}: ключ -> (подпись для GUI, strftime-формат)
+DATE_FORMATS = OrderedDict([
+    ('iso',      ('ГГГГ-ММ-ДД (2026-08-21)', '%Y-%m-%d')),
+    ('ru_dot',   ('ДД.ММ.ГГГГ (21.08.2026)', '%d.%m.%Y')),
+    ('ru_dash',  ('ДД-ММ-ГГГГ (21-08-2026)', '%d-%m-%Y')),
+    ('compact',  ('ГГГГММДД (20260821)',     '%Y%m%d')),
+    ('month',    ('ГГГГ-ММ (2026-08)',       '%Y-%m')),
+    ('year',     ('Только год (2026)',       '%Y')),
+    ('custom',   ('Свой формат…',            '')),
+])
+
+DEFAULT_DATE_FORMAT_PRESET = 'iso'
+DEFAULT_DATE_FORMAT = DATE_FORMATS[DEFAULT_DATE_FORMAT_PRESET][1]
+
+# Даты-образцы для предпросмотра имени файла, когда сертификата под рукой нет.
+_EXAMPLE_VALID_FROM = datetime(2026, 8, 21)
+_EXAMPLE_VALID_TO = datetime(2027, 8, 21)
+
+
+def date_format_for_preset(preset, custom_format=''):
+    """strftime-формат по выбранному пресету даты."""
+    if preset == 'custom':
+        return custom_format or DEFAULT_DATE_FORMAT
+    entry = DATE_FORMATS.get(preset)
+    return entry[1] if entry else DEFAULT_DATE_FORMAT
+
+
+def _format_date(date_value, date_format):
+    """strftime с защитой от некорректного пользовательского формата."""
+    try:
+        return date_value.strftime(date_format)
+    except (ValueError, TypeError):
+        return date_value.strftime(DEFAULT_DATE_FORMAT)
 
 # Национальные OID ГосСУОК (см. "Перечень объектных уникальных идентификаторов" nces.by).
 # asn1crypto отдаёт неизвестные OID строкой, поэтому сверяем по окончанию.
@@ -171,7 +206,7 @@ def _subject_key_identifier(certificate):
         return ''
 
 
-def extract_fields(certificate):
+def extract_fields(certificate, date_format=DEFAULT_DATE_FORMAT):
     """Собрать все поддерживаемые поля сертификата в словарь {ключ: строка}."""
     tbs = certificate['tbs_certificate']
     subject = tbs['subject'].native or {}
@@ -199,15 +234,18 @@ def extract_fields(certificate):
         'position': _certificate_extension(certificate, _ORG_POSITION_OID_SUFFIX) or _text(subject.get('title')),
         'email': _text(subject.get('email_address')),
         'thumbprint': certificate.sha1.hex(),
-        'valid_from': validity['not_before'].native.strftime('%Y-%m-%d'),
-        'valid_to': validity['not_after'].native.strftime('%Y-%m-%d'),
+        'valid_from': _format_date(validity['not_before'].native, date_format),
+        'valid_to': _format_date(validity['not_after'].native, date_format),
         'issuer': _text(issuer.get('common_name')),
     }
 
 
-def example_fields():
+def example_fields(date_format=DEFAULT_DATE_FORMAT):
     """Значения-заглушки для предпросмотра, когда читать нечего."""
-    return {key: example for key, (_label, example) in FIELDS.items()}
+    fields = {key: example for key, (_label, example) in FIELDS.items()}
+    fields['valid_from'] = _format_date(_EXAMPLE_VALID_FROM, date_format)
+    fields['valid_to'] = _format_date(_EXAMPLE_VALID_TO, date_format)
+    return fields
 
 
 def build_filename(fields, template):
@@ -394,7 +432,8 @@ def _attribute_cert_org_fields(attr_cert):
     }
 
 
-def extract_attribute_fields(attr_cert, standalone_bytes, linked_fields=None):
+def extract_attribute_fields(attr_cert, standalone_bytes, linked_fields=None,
+                             date_format=DEFAULT_DATE_FORMAT):
     """Поля атрибутного сертификата (AttributeCertificateV1/V2) для имени файла.
 
     У атрибутного сертификата нет subject в привычном смысле — ФИО и т.п.
@@ -419,8 +458,8 @@ def extract_attribute_fields(attr_cert, standalone_bytes, linked_fields=None):
             fields[key] = own_org_fields[key]
 
     fields['serial'] = format(ac_info['serial_number'].native, 'x')
-    fields['valid_from'] = validity['not_before_time'].native.strftime('%Y-%m-%d')
-    fields['valid_to'] = validity['not_after_time'].native.strftime('%Y-%m-%d')
+    fields['valid_from'] = _format_date(validity['not_before_time'].native, date_format)
+    fields['valid_to'] = _format_date(validity['not_after_time'].native, date_format)
     fields['thumbprint'] = hashlib.sha1(standalone_bytes).hexdigest()
     return fields
 
@@ -448,7 +487,7 @@ def _save_extracted(output_dir, fields, template, cert_bytes, extension, stats, 
 
 
 def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_certs=False,
-              extract_attribute_certs=False, stats=None):
+              extract_attribute_certs=False, date_format=DEFAULT_DATE_FORMAT, stats=None):
     """Извлечь сертификаты из одного .p7b."""
     if stats is None:
         stats = {'saved': 0, 'duplicates': 0, 'saved_attribute': 0, 'duplicates_attribute': 0, 'skipped_ca': 0, 'skipped_attribute': 0, 'errors': 0, 'files': 0}
@@ -482,7 +521,7 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
         for cert in certificates:
             if cert.name == 'certificate':
                 try:
-                    fields = extract_fields(cert.chosen)
+                    fields = extract_fields(cert.chosen, date_format=date_format)
                     fields_by_serial[fields['serial']] = fields
                 except Exception:
                     continue
@@ -503,7 +542,9 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
                 attr_cert = cert.chosen
                 standalone_bytes = _attribute_cert_standalone_bytes(cert)
                 linked_serial = _attribute_cert_holder_serial(attr_cert)
-                fields = extract_attribute_fields(attr_cert, standalone_bytes, fields_by_serial.get(linked_serial))
+                fields = extract_attribute_fields(attr_cert, standalone_bytes,
+                                                  fields_by_serial.get(linked_serial),
+                                                  date_format=date_format)
                 _save_extracted(output_dir, fields, template, standalone_bytes, '.acr',
                                  stats, 'Атрибутный сертификат', p7b_file_path, kind='attribute')
                 continue
@@ -514,7 +555,7 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
                 logging.info("Пропущен сертификат УЦ/ЦАС из %s (#%s)", p7b_file_path, index)
                 continue
 
-            fields = extract_fields(certificate)
+            fields = extract_fields(certificate, date_format=date_format)
             _save_extracted(output_dir, fields, template, cert.dump(), '.cer',
                              stats, 'Сертификат', p7b_file_path)
         except Exception as error:
@@ -528,7 +569,7 @@ def parse_p7b(p7b_file_path, output_dir, template=DEFAULT_TEMPLATE, only_user_ce
 
 
 def parse_p7b_files(input_folder, output_folder, template=DEFAULT_TEMPLATE, only_user_certs=False,
-                     extract_attribute_certs=False):
+                     extract_attribute_certs=False, date_format=DEFAULT_DATE_FORMAT):
     """Обработать все .p7b из входной папки. Возвращает статистику обработки."""
     stats = {'saved': 0, 'duplicates': 0, 'saved_attribute': 0, 'duplicates_attribute': 0, 'skipped_ca': 0, 'skipped_attribute': 0, 'errors': 0, 'files': 0}
 
@@ -544,12 +585,13 @@ def parse_p7b_files(input_folder, output_folder, template=DEFAULT_TEMPLATE, only
         if filename.lower().endswith('.p7b'):
             parse_p7b(os.path.join(input_folder, filename), output_folder,
                       template=template, only_user_certs=only_user_certs,
-                      extract_attribute_certs=extract_attribute_certs, stats=stats)
+                      extract_attribute_certs=extract_attribute_certs,
+                      date_format=date_format, stats=stats)
 
     return stats
 
 
-def read_first_certificate_fields(input_folder):
+def read_first_certificate_fields(input_folder, date_format=DEFAULT_DATE_FORMAT):
     """Поля первого найденного пользовательского сертификата — для предпросмотра имени в GUI."""
     if not input_folder or not os.path.isdir(input_folder):
         return None
@@ -564,14 +606,13 @@ def read_first_certificate_fields(input_folder):
                     continue
                 certificate = cert.chosen
                 if not is_excluded_from_user_certs(certificate):
-                    return extract_fields(certificate)
+                    return extract_fields(certificate, date_format=date_format)
         except Exception:
             continue
     return None
 
 
 if __name__ == "__main__":
-    from datetime import datetime
     from settings import Settings
 
     settings = Settings()
@@ -587,7 +628,8 @@ if __name__ == "__main__":
         settings.output_folder or r'./out',
         template=settings.template(),
         only_user_certs=settings.only_user_certs,
-        extract_attribute_certs=settings.extract_attribute_certs)
+        extract_attribute_certs=settings.extract_attribute_certs,
+        date_format=settings.date_format())
     print("Сертификатов сохранено: {saved}, дубликатов: {duplicates}; "
           "атрибутных сохранено: {saved_attribute}, дубликатов: {duplicates_attribute}; "
           "пропущено УЦ/ЦАС: {skipped_ca}, пропущено атрибутных (опция выключена): {skipped_attribute}; "
