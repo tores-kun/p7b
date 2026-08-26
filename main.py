@@ -114,6 +114,13 @@ class CertificateParserApp(QWidget):
                 border-radius: 4px;
                 padding: 4px 6px;
             }
+            QLineEdit:disabled, QComboBox:disabled {
+                background-color: #eceeed;
+                color: #9aa39d;
+            }
+            QLabel:disabled {
+                color: #9aa39d;
+            }
             QPushButton {
                 color: white;
                 background-color: #2e7d32;
@@ -185,7 +192,11 @@ class CertificateParserApp(QWidget):
             'Например: %Y — только год, %d.%m.%Y — 21.08.2026.')
         self.date_format_edit.textChanged.connect(self.on_date_format_changed)
         date_row.addWidget(self.date_format_edit)
-        naming_form.addRow('Формат даты:', date_row)
+
+        self.date_format_label = QLabel('Формат даты:', self)
+        self.date_format_label.setToolTip(
+            'Доступно, когда в шаблоне есть {valid_from} или {valid_to}.')
+        naming_form.addRow(self.date_format_label, date_row)
 
         naming_container.addLayout(naming_form)
 
@@ -249,6 +260,7 @@ class CertificateParserApp(QWidget):
         self.template_edit.blockSignals(True)
         self.template_edit.setText(template_for_preset(preset, self.settings.custom_template))
         self.template_edit.blockSignals(False)
+        self.update_date_format_availability()
         self.update_preview()
 
     def on_preset_changed(self):
@@ -260,21 +272,34 @@ class CertificateParserApp(QWidget):
         if self.current_preset() == 'custom':
             self.settings.custom_template = text
             self.save_config()
+        self.update_date_format_availability()
         self.update_preview()
 
     def current_date_format_preset(self):
         return self.date_format_combo.currentData()
 
+    def template_uses_dates(self):
+        """В шаблоне есть поле с датой — только тогда её формат на что-то влияет."""
+        template = self.current_template()
+        return '{valid_from}' in template or '{valid_to}' in template
+
+    def update_date_format_availability(self):
+        """Настройки формата даты доступны, только если шаблон содержит дату."""
+        uses_dates = self.template_uses_dates()
+        self.date_format_label.setEnabled(uses_dates)
+        self.date_format_combo.setEnabled(uses_dates)
+        self.date_format_edit.setEnabled(
+            uses_dates and self.current_date_format_preset() == 'custom')
+
     def apply_date_format_preset_to_edit(self):
         """Для готового формата даты показываем его строку только для чтения."""
         preset = self.current_date_format_preset()
-        is_custom = preset == 'custom'
-        self.date_format_edit.setEnabled(is_custom)
 
         self.date_format_edit.blockSignals(True)
         self.date_format_edit.setText(
             date_format_for_preset(preset, self.settings.custom_date_format))
         self.date_format_edit.blockSignals(False)
+        self.update_date_format_availability()
         self.reload_preview_fields()
 
     def on_date_format_preset_changed(self):
